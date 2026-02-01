@@ -1,176 +1,113 @@
-package com.pdf.reader;
+package com.pdf.reader.net;
 
-import android.Manifest;
-import android.content.ContentResolver;
-import android.content.Intent;
-import android.content.SharedPreferences;
-import android.net.Uri;
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.Network;
+import android.net.NetworkCapabilities;
+import android.net.NetworkRequest;
+import android.net.wifi.WifiNetworkSpecifier;
 import android.os.Build;
-import android.os.Bundle;
-import android.print.PrintManager;
-import android.provider.Settings;
-import android.view.View;
-import android.widget.Button;
-import android.widget.EditText;
-import android.widget.TextView;
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.annotation.Nullable;
-import androidx.appcompat.app.AppCompatActivity;
-import androidx.core.content.ContextCompat;
+import androidx.annotation.NonNull;
+import androidx.annotation.RequiresApi;
 
-import com.pdf.reader.net.WifiConnector;
-import com.pdf.reader.print.PdfPrintAdapter;
+/**
+ * 使用 WifiNetworkSpecifier 连接到指定 SSID 的热点（Android 10+）
+ * 连接/断开状态通过回调告知 UI。
+ */
+public class WifiConnector {
 
-public class MainActivity extends AppCompatActivity {
-
-    private EditText etSsid;
-    private EditText etPassword;
-    private Button btnConnect;
-    private Button btnDisconnect;
-    private Button btnChoosePdf;
-    private Button btnPrintPdf;
-    private Button btnPrintSettings;
-    private TextView tvStatus;
-    private TextView tvSelected;
-
-    private WifiConnector wifiConnector;
-    private Uri selectedPdfUri;
-
-    private SharedPreferences prefs;
-
-    private final ActivityResultLauncher<String[]> requestPermissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
-                // 用户交互完成后再次尝试连接（无论成败由 WifiConnector 回调告知）
-                startConnect();
-            });
-
-    private final ActivityResultLauncher<Intent> pickPdfLauncher =
-            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), activityResult -> {
-                if (activityResult.getResultCode() == RESULT_OK && activityResult.getData() != null) {
-                    Uri uri = activityResult.getData().getData();
-                    if (uri != null) {
-                        // 申请持久化读权限，便于后续打印
-                        final int takeFlags = activityResult.getData().getFlags()
-                                & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                        try {
-                            getContentResolver().takePersistableUriPermission(uri, takeFlags);
-                        } catch (Exception ignored) { }
-                        selectedPdfUri = uri;
-                        tvSelected.setText("已选择文件: " + uri.toString());
-                        btnPrintPdf.setEnabled(true);
-                    }
-                }
-            });
-
-    @Override
-    protected void onCreate(@Nullable Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_main);
-
-        prefs = getSharedPreferences("printer_prefs", MODE_PRIVATE);
-
-        etSsid = findViewById(R.id.etSsid);
-        etPassword = findViewById(R.id.etPassword);
-        btnConnect = findViewById(R.id.btnConnect);
-        btnDisconnect = findViewById(R.id.btnDisconnect);
-        btnChoosePdf = findViewById(R.id.btnChoosePdf);
-        btnPrintPdf = findViewById(R.id.btnPrintPdf);
-        btnPrintSettings = findViewById(R.id.btnPrintSettings);
-        tvStatus = findViewById(R.id.tvStatus);
-        tvSelected = findViewById(R.id.tvSelected);
-
-        wifiConnector = new WifiConnector(this, new WifiConnector.Callback() {
-            @Override
-            public void onConnecting() {
-                runOnUiThread(() -> tvStatus.setText("状态: 正在连接…"));
-            }
-
-            @Override
-            public void onConnected() {
-                runOnUiThread(() -> tvStatus.setText("状态: 已连接到打印机热点"));
-            }
-
-            @Override
-            public void onDisconnected() {
-                runOnUiThread(() -> tvStatus.setText("状态: 已断开连接"));
-            }
-
-            @Override
-            public void onFailed(String reason) {
-                runOnUiThread(() -> tvStatus.setText("状态: 连接失败 - " + reason));
-            }
-        });
-
-        // 恢复上次使用的 SSID/密码
-        etSsid.setText(prefs.getString("ssid", ""));
-        etPassword.setText(prefs.getString("password", ""));
-
-        btnConnect.setOnClickListener(v -> ensurePermissionAndConnect());
-        btnDisconnect.setOnClickListener(v -> wifiConnector.disconnect());
-
-        btnChoosePdf.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("application/pdf");
-            pickPdfLauncher.launch(intent);
-        });
-
-        btnPrintPdf.setOnClickListener(v -> {
-            if (selectedPdfUri == null) {
-                tvStatus.setText("状态: 请先选择 PDF 文件");
-                return;
-            }
-            printSelectedPdf(selectedPdfUri);
-        });
-
-        btnPrintSettings.setOnClickListener(v -> {
-            try {
-                startActivity(new Intent(Settings.ACTION_PRINT_SETTINGS));
-            } catch (Exception e) {
-                tvStatus.setText("状态: 无法打开打印设置，请在系统设置里搜索“打印”启用 Mopria/Epson 服务");
-            }
-        });
-
-        btnPrintPdf.setEnabled(false);
-        tvStatus.setText("状态: 就绪");
+    public interface Callback {
+        void onConnecting();
+        void onConnected();
+        void onDisconnected();
+        void onFailed(String reason);
     }
 
-    private void ensurePermissionAndConnect() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            requestPermissionLauncher.launch(new String[]{Manifest.permission.NEARBY_WIFI_DEVICES});
-        } else {
-            requestPermissionLauncher.launch(new String[]{Manifest.permission.ACCESS_FINE_LOCATION});
-        }
+    private final Context appContext;
+    private final ConnectivityManager cm;
+    private final Callback callback;
+
+    private ConnectivityManager.NetworkCallback networkCallback;
+    private Network boundNetwork;
+
+    public WifiConnector(@NonNull Context context, @NonNull Callback callback) {
+        this.appContext = context.getApplicationContext();
+        this.cm = (ConnectivityManager) appContext.getSystemService(Context.CONNECTIVITY_SERVICE);
+        this.callback = callback;
     }
 
-    private void startConnect() {
-        String ssid = etSsid.getText().toString().trim();
-        String password = etPassword.getText().toString().trim();
-        if (ssid.isEmpty()) {
-            tvStatus.setText("状态: 请输入打印机热点 SSID");
+    public void connect(@NonNull String ssid, @NonNull String password) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            if (callback != null) {
+                callback.onFailed("当前系统版本过低，需 Android 10+");
+            }
             return;
         }
-        // 连接前保存最近使用
-        prefs.edit().putString("ssid", ssid).putString("password", password).apply();
-        wifiConnector.connect(ssid, password);
-    }
 
-    private void printSelectedPdf(Uri uri) {
-        try {
-            ContentResolver resolver = getContentResolver();
-            String jobName = "打印PDF";
-            PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
-            PdfPrintAdapter adapter = new PdfPrintAdapter(this, resolver, uri, jobName);
-            printManager.print(jobName, adapter, null);
-        } catch (Exception e) {
-            tvStatus.setText("状态: 启动打印失败 - " + e.getMessage());
+        disconnect(); // 清理旧回调
+
+        if (callback != null) callback.onConnecting();
+
+        WifiNetworkSpecifier.Builder specBuilder = new WifiNetworkSpecifier.Builder()
+                .setSsid(ssid);
+
+        if (!password.isEmpty()) {
+            // Epson L8058 一般为 WPA2
+            specBuilder.setWpa2Passphrase(password);
         }
+
+        WifiNetworkSpecifier specifier = specBuilder.build();
+
+        NetworkRequest request = new NetworkRequest.Builder()
+                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
+                // 打印机热点通常无互联网，移除对互联网能力的要求，避免系统偏好其他网络
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .setNetworkSpecifier(specifier)
+                .build();
+
+        networkCallback = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(@NonNull Network network) {
+                // 绑定进程到该网络，确保后续通信走打印机热点（可按需移除）
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    cm.bindProcessToNetwork(network);
+                    boundNetwork = network;
+                }
+                if (callback != null) callback.onConnected();
+            }
+
+            @Override
+            public void onUnavailable() {
+                if (callback != null) callback.onFailed("网络不可用或用户未同意连接");
+            }
+
+            @Override
+            public void onLost(@NonNull Network network) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    cm.bindProcessToNetwork(null);
+                    boundNetwork = null;
+                }
+                if (callback != null) callback.onDisconnected();
+            }
+        };
+
+        // 触发系统连接面板（用户需同意）
+        cm.requestNetwork(request, networkCallback);
     }
 
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        wifiConnector.disconnect();
+    public void disconnect() {
+        try {
+            if (networkCallback != null) {
+                cm.unregisterNetworkCallback(networkCallback);
+            }
+        } catch (Exception ignored) { }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (boundNetwork != null) {
+                cm.bindProcessToNetwork(null);
+                boundNetwork = null;
+            }
+        }
+        networkCallback = null;
+        if (callback != null) callback.onDisconnected();
     }
 }
