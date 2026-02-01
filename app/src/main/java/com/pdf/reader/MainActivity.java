@@ -1,26 +1,14 @@
 package com.pdf.reader;
 
-import android.Manifest;
-import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
-import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.content.SharedPreferences;
-import android.location.LocationManager;
 import android.net.Uri;
-import android.net.wifi.ScanResult;
-import android.net.wifi.WifiManager;
-import android.os.Build;
 import android.os.Bundle;
 import android.print.PrintManager;
 import android.provider.Settings;
-import android.view.View;
-import android.widget.AdapterView;
-import android.widget.ArrayAdapter;
 import android.widget.Button;
-import android.widget.EditText;
-import android.widget.ListView;
+import android.widget.RadioButton;
+import android.widget.RadioGroup;
 import android.widget.TextView;
 
 import androidx.activity.result.ActivityResultLauncher;
@@ -28,67 +16,20 @@ import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 
-import com.pdf.reader.net.WifiConnector;
 import com.pdf.reader.print.PdfPrintAdapter;
-
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Set;
+import com.pdf.reader.print.SelectivePdfPrintAdapter;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final int ACTION_NONE = 0;
-    private static final int ACTION_CONNECT = 1;
-    private static final int ACTION_SCAN = 2;
-
-    private EditText etSsid;
-    private EditText etPassword;
-    private Button btnConnect;
-    private Button btnDisconnect;
     private Button btnChoosePdf;
     private Button btnPrintPdf;
     private Button btnPrintSettings;
-    private Button btnScan;
     private TextView tvStatus;
     private TextView tvSelected;
-    private ListView lvNetworks;
-
-    private WifiConnector wifiConnector;
-    private WifiManager wifiManager;
-
-    private BroadcastReceiver wifiScanReceiver;
-    private boolean scanReceiverRegistered = false;
-
-    private ArrayAdapter<String> networksAdapter;
-    private final List<String> networks = new ArrayList<>();
+    private RadioGroup rgPageMode;
+    private RadioButton rbAll, rbOdd, rbEven;
 
     private Uri selectedPdfUri;
-    private SharedPreferences prefs;
-
-    private int pendingAction = ACTION_NONE;
-
-    private final ActivityResultLauncher<String[]> requestPermissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
-                if (!areAllRequiredPermissionsGranted(result)) {
-                    tvStatus.setText("状态: 权限未全部授予，请允许“附近设备”和“位置信息”");
-                    pendingAction = ACTION_NONE;
-                    return;
-                }
-                if (!ensureEnvironmentReady(false)) {
-                    pendingAction = ACTION_NONE;
-                    return;
-                }
-                int action = pendingAction;
-                pendingAction = ACTION_NONE;
-                if (action == ACTION_CONNECT) {
-                    startConnect();
-                } else if (action == ACTION_SCAN) {
-                    startScan();
-                }
-            });
 
     private final ActivityResultLauncher<Intent> pickPdfLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), activityResult -> {
@@ -101,6 +42,7 @@ public class MainActivity extends AppCompatActivity {
                         selectedPdfUri = uri;
                         tvSelected.setText("已选择文件: " + uri.toString());
                         btnPrintPdf.setEnabled(true);
+                        tvStatus.setText("状态: 已选择 PDF");
                     }
                 }
             });
@@ -110,53 +52,15 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        prefs = getSharedPreferences("printer_prefs", MODE_PRIVATE);
-
-        etSsid = findViewById(R.id.etSsid);
-        etPassword = findViewById(R.id.etPassword);
-        btnConnect = findViewById(R.id.btnConnect);
-        btnDisconnect = findViewById(R.id.btnDisconnect);
         btnChoosePdf = findViewById(R.id.btnChoosePdf);
         btnPrintPdf = findViewById(R.id.btnPrintPdf);
         btnPrintSettings = findViewById(R.id.btnPrintSettings);
-        btnScan = findViewById(R.id.btnScan);
         tvStatus = findViewById(R.id.tvStatus);
         tvSelected = findViewById(R.id.tvSelected);
-        lvNetworks = findViewById(R.id.lvNetworks);
-
-        wifiManager = (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        wifiConnector = new WifiConnector(this, new WifiConnector.Callback() {
-            @Override public void onConnecting() { runOnUiThread(() -> tvStatus.setText("状态: 正在提交连接建议…请在通知栏或 Wi‑Fi 面板确认")); }
-            @Override public void onConnected()  { runOnUiThread(() -> tvStatus.setText("状态: 已连接到打印机热点（系统级）")); }
-            @Override public void onDisconnected(){ runOnUiThread(() -> tvStatus.setText("状态: 已断开连接/移除建议")); }
-            @Override public void onFailed(String reason) { runOnUiThread(() -> tvStatus.setText("状态: 连接失败 - " + reason)); }
-        });
-
-        networksAdapter = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, networks);
-        lvNetworks.setAdapter(networksAdapter);
-        lvNetworks.setOnItemClickListener((AdapterView<?> parent, View view, int position, long id) -> {
-            String ssid = networks.get(position);
-            etSsid.setText(ssid);
-            tvStatus.setText("状态: 已选择网络 " + ssid);
-        });
-
-        // 恢复上次填写
-        etSsid.setText(prefs.getString("ssid", ""));
-        etPassword.setText(prefs.getString("password", ""));
-
-        btnConnect.setOnClickListener(v -> {
-            pendingAction = ACTION_CONNECT;
-            if (!ensureEnvironmentReady(true)) return;
-            requestPermissionsForCurrentApi();
-        });
-
-        btnDisconnect.setOnClickListener(v -> wifiConnector.disconnect());
-
-        btnScan.setOnClickListener(v -> {
-            pendingAction = ACTION_SCAN;
-            if (!ensureEnvironmentReady(true)) return;
-            requestPermissionsForCurrentApi();
-        });
+        rgPageMode = findViewById(R.id.rgPageMode);
+        rbAll = findViewById(R.id.rbAll);
+        rbOdd = findViewById(R.id.rbOdd);
+        rbEven = findViewById(R.id.rbEven);
 
         btnChoosePdf.setOnClickListener(v -> {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -170,192 +74,29 @@ public class MainActivity extends AppCompatActivity {
                 tvStatus.setText("状态: 请先选择 PDF 文件");
                 return;
             }
-            printSelectedPdf(selectedPdfUri);
+            int checkedId = rgPageMode.getCheckedRadioButtonId();
+            if (checkedId == R.id.rbAll) {
+                printAll(selectedPdfUri);
+            } else if (checkedId == R.id.rbOdd) {
+                printSelective(selectedPdfUri, SelectivePdfPrintAdapter.Mode.ODD);
+            } else if (checkedId == R.id.rbEven) {
+                printSelective(selectedPdfUri, SelectivePdfPrintAdapter.Mode.EVEN);
+            }
         });
 
         btnPrintSettings.setOnClickListener(v -> {
             try { startActivity(new Intent(Settings.ACTION_PRINT_SETTINGS)); }
-            catch (Exception e) { tvStatus.setText("状态: 无法打开打印设置，请在系统设置里搜索“打印”启用 Mopria/Epson 服务"); }
+            catch (Exception e) { tvStatus.setText("状态: 无法打开打印设置，请在系统设置里搜索“打印”启用 华为/Mopria/Epson 服务"); }
         });
 
         btnPrintPdf.setEnabled(false);
         tvStatus.setText("状态: 就绪");
     }
 
-    private void requestPermissionsForCurrentApi() {
-        if (Build.VERSION.SDK_INT >= 33) {
-            requestPermissionLauncher.launch(new String[] {
-                    Manifest.permission.NEARBY_WIFI_DEVICES,
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-            });
-        } else {
-            requestPermissionLauncher.launch(new String[] {
-                    Manifest.permission.ACCESS_FINE_LOCATION,
-                    Manifest.permission.ACCESS_COARSE_LOCATION
-            });
-        }
-    }
-
-    private boolean areAllRequiredPermissionsGranted(Map<String, Boolean> result) {
-        if (Build.VERSION.SDK_INT >= 33) {
-            boolean near = Boolean.TRUE.equals(result.get(Manifest.permission.NEARBY_WIFI_DEVICES));
-            boolean fine = Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_FINE_LOCATION));
-            boolean coarse = Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_COARSE_LOCATION));
-            return near && (fine || coarse);
-        } else {
-            boolean fine = Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_FINE_LOCATION));
-            boolean coarse = Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_COARSE_LOCATION));
-            return (fine || coarse);
-        }
-    }
-
-    // 检查 Wi‑Fi 是否开启与定位开关是否打开；prompt=true 时引导用户前往设置
-    private boolean ensureEnvironmentReady(boolean prompt) {
-        if (wifiManager == null) {
-            tvStatus.setText("状态: 设备不支持 Wi‑Fi");
-            return false;
-        }
-
-        boolean wifiEnabled;
-        try { wifiEnabled = wifiManager.isWifiEnabled(); } catch (Exception e) { wifiEnabled = true; }
-        if (!wifiEnabled) {
-            tvStatus.setText("状态: 请先开启 Wi‑Fi 再继续");
-            if (prompt) { try { startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS)); } catch (Exception ignored) {} }
-            return false;
-        }
-
-        boolean locationEnabled = isLocationEnabled(this);
-        if (!locationEnabled) {
-            tvStatus.setText("状态: 请先开启定位开关（用于扫描/建议连接）");
-            if (prompt) { try { startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)); } catch (Exception ignored) {} }
-            return false;
-        }
-
-        return true;
-    }
-
-    private static boolean isLocationEnabled(Context context) {
-        try {
-            LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
-            if (lm == null) return false;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) return lm.isLocationEnabled();
-            int mode = Settings.Secure.getInt(context.getContentResolver(),
-                    Settings.Secure.LOCATION_MODE, Settings.Secure.LOCATION_MODE_OFF);
-            return mode != Settings.Secure.LOCATION_MODE_OFF;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private void startConnect() {
-        String ssid = etSsid.getText().toString().trim();
-        String password = etPassword.getText().toString().trim();
-        if (ssid.isEmpty()) {
-            tvStatus.setText("状态: 请输入或选择打印机热点 SSID");
-            return;
-        }
-        // 保存最近填写
-        prefs.edit().putString("ssid", ssid).putString("password", password).apply();
-
-        // 提交系统级连接建议
-        wifiConnector.connect(ssid, password);
-
-        // 主动引导用户进入 Wi‑Fi 面板更快完成连接（尤其是首连时）
-        try {
-            startActivity(new Intent(Settings.Panel.ACTION_WIFI));
-        } catch (Exception ignored) {}
-    }
-
-    private void startScan() {
-        if (wifiManager == null) {
-            tvStatus.setText("状态: 设备不支持 Wi‑Fi");
-            return;
-        }
-        tvStatus.setText("状态: 正在扫描附近网络…");
-        registerScanReceiverIfNeeded();
-
-        // 先显示最近的结果
-        updateScanResults();
-
-        boolean started = false;
-        try { started = wifiManager.startScan(); }
-        catch (SecurityException se) {
-            tvStatus.setText("状态: 无权扫描，请在系统设置授予定位/Wi‑Fi 权限");
-            return;
-        }
-
-        if (!started) {
-            tvStatus.setText("状态: 已显示最近扫描结果（系统限制主动扫描频率）");
-        }
-    }
-
-    private void registerScanReceiverIfNeeded() {
-        if (scanReceiverRegistered) return;
-        if (wifiScanReceiver == null) {
-            wifiScanReceiver = new BroadcastReceiver() {
-                @Override
-                public void onReceive(Context context, Intent intent) {
-                    if (WifiManager.SCAN_RESULTS_AVAILABLE_ACTION.equals(intent.getAction())) {
-                        updateScanResults();
-                    }
-                }
-            };
-        }
-        IntentFilter filter = new IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION);
-        registerReceiver(wifiScanReceiver, filter);
-        scanReceiverRegistered = true;
-    }
-
-    private void unregisterScanReceiverIfNeeded() {
-        if (scanReceiverRegistered && wifiScanReceiver != null) {
-            try { unregisterReceiver(wifiScanReceiver); } catch (Exception ignored) {}
-            scanReceiverRegistered = false;
-        }
-    }
-
-    private void updateScanResults() {
-        try {
-            List<ScanResult> results = wifiManager.getScanResults();
-            if (results == null) results = new ArrayList<>();
-
-            List<String> preferred = new ArrayList<>();
-            Set<String> dedup = new LinkedHashSet<>();
-
-            for (ScanResult sr : results) {
-                if (sr == null || sr.SSID == null || sr.SSID.isEmpty()) continue;
-                String ssid = sr.SSID;
-                if (!dedup.add(ssid)) continue;
-                String lower = ssid.toLowerCase(Locale.ROOT);
-                if (lower.contains("epson") || lower.contains("l8058") || lower.startsWith("direct-")) {
-                    preferred.add(ssid);
-                }
-            }
-
-            // 若没检出明显的打印机，显示全部（去重）
-            if (preferred.isEmpty()) {
-                for (ScanResult sr : results) {
-                    if (sr == null || sr.SSID == null || sr.SSID.isEmpty()) continue;
-                    dedup.add(sr.SSID);
-                }
-                preferred = new ArrayList<>(dedup);
-            }
-
-            networks.clear();
-            networks.addAll(preferred);
-            networksAdapter.notifyDataSetChanged();
-
-            tvStatus.setText("状态: 扫描完成，发现 " + networks.size() + " 个网络"
-                    + (networks.isEmpty() ? "（检查打印机是否开启热点）" : ""));
-        } catch (SecurityException se) {
-            tvStatus.setText("状态: 无权读取扫描结果，请授予权限");
-        }
-    }
-
-    private void printSelectedPdf(Uri uri) {
+    private void printAll(Uri uri) {
         try {
             ContentResolver resolver = getContentResolver();
-            String jobName = "打印PDF";
+            String jobName = "打印PDF（全部）";
             PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
             PdfPrintAdapter adapter = new PdfPrintAdapter(this, resolver, uri, jobName);
             printManager.print(jobName, adapter, null);
@@ -364,21 +105,14 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    @Override
-    protected void onPause() {
-        super.onPause();
-        // 退出时记住上次填写
-        prefs.edit()
-                .putString("ssid", etSsid.getText().toString().trim())
-                .putString("password", etPassword.getText().toString().trim())
-                .apply();
-        unregisterScanReceiverIfNeeded();
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        unregisterScanReceiverIfNeeded();
-        wifiConnector.disconnect();
+    private void printSelective(Uri uri, SelectivePdfPrintAdapter.Mode mode) {
+        try {
+            String jobName = mode == SelectivePdfPrintAdapter.Mode.ODD ? "打印PDF（仅奇数页）" : "打印PDF（仅偶数页）";
+            PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
+            SelectivePdfPrintAdapter adapter = new SelectivePdfPrintAdapter(this, uri, jobName, mode);
+            printManager.print(jobName, adapter, null);
+        } catch (Exception e) {
+            tvStatus.setText("状态: 启动打印失败 - " + e.getMessage());
+        }
     }
 }
