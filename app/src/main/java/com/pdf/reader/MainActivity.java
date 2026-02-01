@@ -1,8 +1,10 @@
 package com.pdf.reader;
 
+import android.Manifest;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.print.PrintManager;
 import android.provider.Settings;
@@ -18,18 +20,35 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import com.pdf.reader.print.PdfPrintAdapter;
 import com.pdf.reader.print.SelectivePdfPrintAdapter;
+import com.pdf.reader.util.NetUtils;
+import com.pdf.reader.util.PrintServiceChecker;
+
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
     private Button btnChoosePdf;
     private Button btnPrintPdf;
     private Button btnPrintSettings;
+    private Button btnWifiSettings;
+    private Button btnSelfCheck;
     private TextView tvStatus;
     private TextView tvSelected;
     private RadioGroup rgPageMode;
     private RadioButton rbAll, rbOdd, rbEven;
 
     private Uri selectedPdfUri;
+
+    private final ActivityResultLauncher<String[]> permissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
+                if (areLocationPermissionsGranted(result)) {
+                    doSelfCheck();
+                } else {
+                    appendStatus("未授予定位权限，无法检测当前 Wi‑Fi 连接。");
+                }
+            });
 
     private final ActivityResultLauncher<Intent> pickPdfLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), activityResult -> {
@@ -55,6 +74,8 @@ public class MainActivity extends AppCompatActivity {
         btnChoosePdf = findViewById(R.id.btnChoosePdf);
         btnPrintPdf = findViewById(R.id.btnPrintPdf);
         btnPrintSettings = findViewById(R.id.btnPrintSettings);
+        btnWifiSettings = findViewById(R.id.btnWifiSettings);
+        btnSelfCheck = findViewById(R.id.btnSelfCheck);
         tvStatus = findViewById(R.id.tvStatus);
         tvSelected = findViewById(R.id.tvSelected);
         rgPageMode = findViewById(R.id.rgPageMode);
@@ -86,7 +107,28 @@ public class MainActivity extends AppCompatActivity {
 
         btnPrintSettings.setOnClickListener(v -> {
             try { startActivity(new Intent(Settings.ACTION_PRINT_SETTINGS)); }
-            catch (Exception e) { tvStatus.setText("状态: 无法打开打印设置，请在系统设置里搜索“打印”启用 华为/Mopria/Epson 服务"); }
+            catch (Exception e) { appendStatus("无法打开打印设置，请在系统设置里搜索“打印”启用 华为/Mopria/Epson 插件"); }
+        });
+
+        btnWifiSettings.setOnClickListener(v -> {
+            try {
+                if (Build.VERSION.SDK_INT >= 29) {
+                    startActivity(new Intent(Settings.Panel.ACTION_WIFI));
+                } else {
+                    startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS));
+                }
+            } catch (Exception ignored) {}
+        });
+
+        btnSelfCheck.setOnClickListener(v -> {
+            // 仅在自检时申请权限
+            if (Build.VERSION.SDK_INT >= 23) {
+                permissionLauncher.launch(new String[]{
+                        Manifest.permission.ACCESS_FINE_LOCATION
+                });
+            } else {
+                doSelfCheck();
+            }
         });
 
         btnPrintPdf.setEnabled(false);
@@ -101,7 +143,7 @@ public class MainActivity extends AppCompatActivity {
             PdfPrintAdapter adapter = new PdfPrintAdapter(this, resolver, uri, jobName);
             printManager.print(jobName, adapter, null);
         } catch (Exception e) {
-            tvStatus.setText("状态: 启动打印失败 - " + e.getMessage());
+            appendStatus("启动打印失败 - " + e.getMessage());
         }
     }
 
@@ -112,7 +154,44 @@ public class MainActivity extends AppCompatActivity {
             SelectivePdfPrintAdapter adapter = new SelectivePdfPrintAdapter(this, uri, jobName, mode);
             printManager.print(jobName, adapter, null);
         } catch (Exception e) {
-            tvStatus.setText("状态: 启动打印失败 - " + e.getMessage());
+            appendStatus("启动打印失败 - " + e.getMessage());
         }
+    }
+
+    private void doSelfCheck() {
+        StringBuilder sb = new StringBuilder();
+        // 1) SSID 检测（是否连到打印机热点）
+        String ssid = NetUtils.getCurrentSsid(this);
+        if (ssid == null) {
+            sb.append("• 当前未能获取 SSID，请确认已授予定位权限且开启定位开关；建议在 Wi‑Fi 设置连接到打印机热点（通常以 DIRECT‑ 开头）。\n");
+        } else {
+            sb.append(String.format(Locale.CHINA, "• 当前已连接: %s\n", ssid));
+            if (!(ssid.toLowerCase(Locale.ROOT).contains("epson") ||
+                    ssid.toLowerCase(Locale.ROOT).contains("l8058") ||
+                    ssid.toLowerCase(Locale.ROOT).startsWith("direct-"))) {
+                sb.append("  建议连接到打印机热点（DIRECT‑xx‑EPSON/L8058）或将打印机加入同一路由网络。\n");
+            }
+        }
+
+        // 2) 打印服务检测（是否安装/启用）
+        List<String> services = PrintServiceChecker.listInstalledPrintServices(this);
+        if (services.isEmpty()) {
+            sb.append("• 未检测到已安装的打印服务。请安装并启用：华为打印服务插件 / Mopria Print Service / Epson Print Enabler。\n");
+        } else {
+            sb.append("• 已检测到打印服务: ").append(services).append("\n");
+            sb.append("  如仍显示“该打印机目前无法使用”，请在“打印设置”中确保服务已启用。\n");
+        }
+
+        appendStatus(sb.toString());
+    }
+
+    private boolean areLocationPermissionsGranted(Map<String, Boolean> result) {
+        Boolean fine = result.get(Manifest.permission.ACCESS_FINE_LOCATION);
+        return Boolean.TRUE.equals(fine);
+    }
+
+    private void appendStatus(String msg) {
+        String old = tvStatus.getText() != null ? tvStatus.getText().toString() : "";
+        tvStatus.setText(old + (old.endsWith("\n") || old.isEmpty() ? "" : "\n") + msg);
     }
 }
