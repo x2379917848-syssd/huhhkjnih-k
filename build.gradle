@@ -1,0 +1,8 @@
+// ⭐ 极简配置，避免所有兼容性问题
+plugins {
+    id 'com.android.application' version '8.1.2' apply false
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}
