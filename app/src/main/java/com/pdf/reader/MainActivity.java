@@ -7,6 +7,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.location.LocationManager;
 import android.net.Uri;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiManager;
@@ -34,6 +35,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 
 public class MainActivity extends AppCompatActivity {
@@ -70,9 +72,12 @@ public class MainActivity extends AppCompatActivity {
 
     private final ActivityResultLauncher<String[]> requestPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestMultiplePermissions(), result -> {
-                boolean granted = areAllRequiredPermissionsGranted(result);
-                if (!granted) {
-                    tvStatus.setText("状态: 未授予必要权限，操作已取消");
+                if (!areAllRequiredPermissionsGranted(result)) {
+                    tvStatus.setText("状态: 权限未全部授予，请允许“附近设备”和“位置信息”");
+                    pendingAction = ACTION_NONE;
+                    return;
+                }
+                if (!ensureEnvironmentReady(false)) { // 再次校验 Wi‑Fi/定位开关
                     pendingAction = ACTION_NONE;
                     return;
                 }
@@ -92,9 +97,7 @@ public class MainActivity extends AppCompatActivity {
                     if (uri != null) {
                         final int takeFlags = activityResult.getData().getFlags()
                                 & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-                        try {
-                            getContentResolver().takePersistableUriPermission(uri, takeFlags);
-                        } catch (Exception ignored) { }
+                        try { getContentResolver().takePersistableUriPermission(uri, takeFlags); } catch (Exception ignored) {}
                         selectedPdfUri = uri;
                         tvSelected.setText("已选择文件: " + uri.toString());
                         btnPrintPdf.setEnabled(true);
@@ -132,14 +135,10 @@ public class MainActivity extends AppCompatActivity {
         });
 
         wifiConnector = new WifiConnector(this, new WifiConnector.Callback() {
-            @Override
-            public void onConnecting() { runOnUiThread(() -> tvStatus.setText("状态: 正在连接…")); }
-            @Override
-            public void onConnected() { runOnUiThread(() -> tvStatus.setText("状态: 已连接到打印机热点")); }
-            @Override
-            public void onDisconnected() { runOnUiThread(() -> tvStatus.setText("状态: 已断开连接")); }
-            @Override
-            public void onFailed(String reason) { runOnUiThread(() -> tvStatus.setText("状态: 连接失败 - " + reason)); }
+            @Override public void onConnecting() { runOnUiThread(() -> tvStatus.setText("状态: 正在连接…")); }
+            @Override public void onConnected() { runOnUiThread(() -> tvStatus.setText("状态: 已连接到打印机热点")); }
+            @Override public void onDisconnected() { runOnUiThread(() -> tvStatus.setText("状态: 已断开连接")); }
+            @Override public void onFailed(String reason) { runOnUiThread(() -> tvStatus.setText("状态: 连接失败 - " + reason)); }
         });
 
         // 恢复上次填写
@@ -148,6 +147,7 @@ public class MainActivity extends AppCompatActivity {
 
         btnConnect.setOnClickListener(v -> {
             pendingAction = ACTION_CONNECT;
+            if (!ensureEnvironmentReady(true)) return;
             requestPermissionsForCurrentApi();
         });
 
@@ -155,6 +155,7 @@ public class MainActivity extends AppCompatActivity {
 
         btnScan.setOnClickListener(v -> {
             pendingAction = ACTION_SCAN;
+            if (!ensureEnvironmentReady(true)) return;
             requestPermissionsForCurrentApi();
         });
 
@@ -186,25 +187,86 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void requestPermissionsForCurrentApi() {
-        // 为了兼容部分鸿蒙/定制系统，在 33+ 同时请求 NEARBY_WIFI_DEVICES 与 ACCESS_FINE_LOCATION
         if (Build.VERSION.SDK_INT >= 33) {
-            requestPermissionLauncher.launch(new String[]{
+            requestPermissionLauncher.launch(new String[] {
                     Manifest.permission.NEARBY_WIFI_DEVICES,
-                    Manifest.permission.ACCESS_FINE_LOCATION
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
             });
         } else {
-            requestPermissionLauncher.launch(new String[]{Manifest.permission.ACCESS_FINE_LOCATION});
+            requestPermissionLauncher.launch(new String[] {
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+            });
         }
     }
 
-    private boolean areAllRequiredPermissionsGranted(java.util.Map<String, Boolean> result) {
+    private boolean areAllRequiredPermissionsGranted(Map<String, Boolean> result) {
         if (Build.VERSION.SDK_INT >= 33) {
             boolean near = Boolean.TRUE.equals(result.get(Manifest.permission.NEARBY_WIFI_DEVICES));
             boolean fine = Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_FINE_LOCATION));
-            // 有些 13+ 设备扫描仍需定位权限，连接需要 NEARBY，因此同时校验
-            return near && fine;
+            boolean coarse = Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_COARSE_LOCATION));
+            // 同时校验，兼容部分系统对扫描的定位判定
+            return near && (fine || coarse);
         } else {
-            return Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_FINE_LOCATION));
+            boolean fine = Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_FINE_LOCATION));
+            boolean coarse = Boolean.TRUE.equals(result.get(Manifest.permission.ACCESS_COARSE_LOCATION));
+            return (fine || coarse);
+        }
+    }
+
+    // 检查 Wi‑Fi 是否开启与定位开关是否打开；prompt=true 时引导用户前往设置
+    private boolean ensureEnvironmentReady(boolean prompt) {
+        if (wifiManager == null) {
+            tvStatus.setText("状态: 设备不支持 Wi‑Fi");
+            return false;
+        }
+
+        boolean wifiEnabled;
+        try {
+            wifiEnabled = wifiManager.isWifiEnabled();
+        } catch (Exception e) {
+            wifiEnabled = true; // 少数机型可能抛异常，尽量不拦截
+        }
+
+        if (!wifiEnabled) {
+            tvStatus.setText("状态: 请先开启 Wi‑Fi 再继续");
+            if (prompt) {
+                try { startActivity(new Intent(Settings.ACTION_WIFI_SETTINGS)); } catch (Exception ignored) {}
+            }
+            return false;
+        }
+
+        // Android 10+ 通常要求定位开关打开才能返回扫描结果
+        boolean locationNeeded = true;
+        if (locationNeeded) {
+            boolean locationEnabled = isLocationEnabled(this);
+            if (!locationEnabled) {
+                tvStatus.setText("状态: 请先开启定位开关（用于扫描 Wi‑Fi）");
+                if (prompt) {
+                    try { startActivity(new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)); } catch (Exception ignored) {}
+                }
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static boolean isLocationEnabled(Context context) {
+        try {
+            LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+            if (lm == null) return false;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                return lm.isLocationEnabled();
+            } else {
+                // 低版本兼容（本项目 minSdk 29，理论不会走到这里）
+                int mode = Settings.Secure.getInt(context.getContentResolver(),
+                        Settings.Secure.LOCATION_MODE, Settings.Secure.LOCATION_MODE_OFF);
+                return mode != Settings.Secure.LOCATION_MODE_OFF;
+            }
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -228,6 +290,9 @@ public class MainActivity extends AppCompatActivity {
         tvStatus.setText("状态: 正在扫描附近网络…");
         registerScanReceiverIfNeeded();
 
+        // 先显示最近的结果，体验更好
+        updateScanResults();
+
         boolean started = false;
         try {
             started = wifiManager.startScan();
@@ -237,8 +302,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (!started) {
-            // 某些系统限制主动扫描，直接读取最近一次结果
-            updateScanResults();
+            // 某些系统限制主动扫描，依赖最近结果
+            tvStatus.setText("状态: 已显示最近扫描结果");
         }
     }
 
@@ -273,7 +338,6 @@ public class MainActivity extends AppCompatActivity {
             List<ScanResult> results = wifiManager.getScanResults();
             if (results == null) results = new ArrayList<>();
 
-            // 先挑出 Epson/L8058/Direct 的网络；若为空则显示全部
             List<String> preferred = new ArrayList<>();
             List<String> others = new ArrayList<>();
             Set<String> dedup = new LinkedHashSet<>();
