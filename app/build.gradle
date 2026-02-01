@@ -4,29 +4,39 @@ plugins {
 
 android {
     namespace 'com.pdf.reader'
-    compileSdk 33
-    
+    compileSdk 34
+
     defaultConfig {
-        applicationId "com.pdf.reader"
-        minSdk 21
-        targetSdk 33
-        versionCode 1
-        versionName "1.0.13"
+        applicationId 'com.pdf.reader'
+        // HarmonyOS 4.2 平板通常兼容 Android 12/13，这里最小 29（Android 10），确保可用 WifiNetworkSpecifier
+        minSdk 29
+        targetSdk 34
+
+        // 读取根级 gradle.properties 中的版本
+        versionCode Integer.parseInt(project.findProperty('VERSION_CODE') ?: '1')
+        versionName (project.findProperty('VERSION_NAME') ?: '1.0.0')
     }
-    
+
     buildTypes {
         release {
             minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            minifyEnabled false
         }
     }
-    
+
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        // AGP 8.1.2 + Gradle 8.2 需 Java 17
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
 }
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.1'
-    implementation 'com.google.android.material:material:1.9.0'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.activity:activity:1.8.2'
+    implementation 'androidx.annotation:annotation:1.7.1'
 }
