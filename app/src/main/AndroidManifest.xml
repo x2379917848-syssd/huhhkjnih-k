@@ -1,15 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest package="com.pdf.reader" xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Wi‑Fi/位置权限：扫描与直连都需要 -->
+    <!-- Wi‑Fi/网络状态 -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <!-- Android 10–12 扫描需要 FINE LOCATION；部分设备即使是 13 也会弹定位权限框，兼容保留 -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- 位置权限：扫描需要；部分设备连接也会校验 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <!-- Android 13+ 扫描/直连需要 NEARBY_WIFI_DEVICES（运行时权限） -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Android 13+ 连接/扫描需要的运行时权限 -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
 
-    <!-- 可选：声明需要 Wi‑Fi 硬件，便于应用商店过滤 -->
     <uses-feature android:name="android.hardware.wifi" android:required="true" />
 
     <application
