@@ -72,6 +72,33 @@
             android:layout_marginTop="16dp" />
 
         <TextView
+            android:text="扫描并选择打印机"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" />
+
+        <Button
+            android:id="@+id/btnScan"
+            android:text="扫描附近打印机"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" />
+
+        <ListView
+            android:id="@+id/lvNetworks"
+            android:layout_width="match_parent"
+            android:layout_height="220dp"
+            android:layout_marginTop="8dp" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#DDDDDD"
+            android:layout_marginTop="16dp" />
+
+        <TextView
             android:text="选择并打印 PDF"
             android:textSize="18sp"
             android:textStyle="bold"
