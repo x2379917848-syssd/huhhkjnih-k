@@ -74,9 +74,37 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp" />
 
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="#DDDDDD"
+            android:layout_marginTop="16dp" />
+
+        <TextView
+            android:text="网络与打印服务自检"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp" />
+
+        <Button
+            android:id="@+id/btnWifiSettings"
+            android:text="打开 Wi‑Fi 设置（连接 DIRECT‑xx‑EPSON/L8058）"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" />
+
+        <Button
+            android:id="@+id/btnSelfCheck"
+            android:text="一键自检（网络/插件）"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" />
+
         <Button
             android:id="@+id/btnPrintSettings"
-            android:text="打开系统打印设置（安装/启用 华为打印服务/Mopria/Epson）"
+            android:text="打开系统打印设置（启用 华为/Mopria/Epson 插件）"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp" />
