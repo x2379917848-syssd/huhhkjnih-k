@@ -15,7 +15,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 /**
- * 直接把选定的 PDF 流写入打印输出，保持质量，不进行渲染或分页处理。
+ * 全部页面直传原始 PDF，保证质量（不渲染）。
  */
 public class PdfPrintAdapter extends PrintDocumentAdapter {
 
