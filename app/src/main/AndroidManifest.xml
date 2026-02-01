@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest package="com.pdf.reader" xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- 为了“自检”读取当前 SSID，需要以下权限（仅在用户点自检时请求运行时授权） -->
+    <!-- 自检当前 SSID 需要： -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
@@ -10,7 +10,7 @@
         android:theme="@style/Theme.PdfReader">
         <activity
             android:name=".MainActivity"
-            android:exporteded="true">
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
