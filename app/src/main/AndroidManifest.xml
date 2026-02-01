@@ -1,19 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest package="com.pdf.reader" xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Wi‑Fi/网络状态 -->
-    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <!-- 位置权限：扫描需要；部分设备连接也会校验 -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
-    <!-- Android 13+ 连接/扫描需要的运行时权限 -->
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
-
-    <uses-feature android:name="android.hardware.wifi" android:required="true" />
+    <!-- 不再需要任何 Wi‑Fi/定位权限。使用系统文档选择器与系统打印服务。 -->
 
     <application
         android:label="@string/app_name"
