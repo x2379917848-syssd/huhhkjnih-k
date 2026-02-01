@@ -7,6 +7,7 @@ import android.net.NetworkCapabilities;
 import android.net.NetworkRequest;
 import android.net.wifi.WifiNetworkSpecifier;
 import android.os.Build;
+
 import androidx.annotation.NonNull;
 
 /**
@@ -50,7 +51,7 @@ public class WifiConnector {
 
         NetworkRequest request = new NetworkRequest.Builder()
                 .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .removeCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) // 打印机热点通常无互联网
                 .setNetworkSpecifier(specBuilder.build())
                 .build();
 
@@ -79,7 +80,11 @@ public class WifiConnector {
             }
         };
 
-        cm.requestNetwork(request, networkCallback);
+        try {
+            cm.requestNetwork(request, networkCallback);
+        } catch (SecurityException se) {
+            if (callback != null) callback.onFailed("缺少权限，无法连接");
+        }
     }
 
     public void disconnect() {
